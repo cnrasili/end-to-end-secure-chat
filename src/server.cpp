@@ -19,6 +19,8 @@ Server::~Server() {
 
     std::lock_guard<std::mutex> lock(mutex_);
     for (const auto& entry : clients_) {
+        // Wakes the thread serving this client before the socket goes away
+        shutdownSocket(entry.second);
         closeSocket(entry.second);
     }
     clients_.clear();

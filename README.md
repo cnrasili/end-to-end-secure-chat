@@ -61,6 +61,8 @@ check a fingerprint. This follows the sequence diagram in the project proposal.
 
 ## Building
 
+### Windows
+
 Needs Visual Studio with the C++ tools, and OpenSSL and PortAudio from vcpkg.
 
 ```powershell
@@ -70,6 +72,19 @@ Needs Visual Studio with the C++ tools, and OpenSSL and PortAudio from vcpkg.
 This installs the two libraries on the first run (OpenSSL is built from source,
 so expect it to take a while) and leaves `chat_server.exe` and `chat_client.exe`
 in `build\Release`.
+
+### Linux
+
+The libraries come from the distribution, so vcpkg is not used here.
+
+```bash
+sudo apt install g++ cmake pkg-config libssl-dev portaudio19-dev
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+The binaries land in `build/`. PortAudio provides a CMake package through vcpkg
+and a pkg-config file on Linux, and the build file accepts either one.
 
 ## Running
 

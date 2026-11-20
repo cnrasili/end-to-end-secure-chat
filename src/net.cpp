@@ -46,6 +46,17 @@ void netCleanup() {
 #endif
 }
 
+void shutdownSocket(SocketHandle socket) {
+    if (socket == kInvalidSocket) {
+        return;
+    }
+#ifdef _WIN32
+    ::shutdown(raw(socket), SD_BOTH);
+#else
+    ::shutdown(raw(socket), SHUT_RDWR);
+#endif
+}
+
 void closeSocket(SocketHandle socket) {
     if (socket == kInvalidSocket) {
         return;

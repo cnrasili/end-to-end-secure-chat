@@ -38,11 +38,13 @@ bool Client::connectToServer(const std::string& host, int port) {
 }
 
 void Client::disconnect() {
+    running_.store(false);
     if (socket_ != kInvalidSocket) {
+        // The receive thread is blocked in recv, this is what wakes it
+        shutdownSocket(socket_);
         closeSocket(socket_);
         socket_ = kInvalidSocket;
     }
-    running_.store(false);
 }
 
 bool Client::sendPacketLocked(const Message& msg) {

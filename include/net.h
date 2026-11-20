@@ -18,6 +18,10 @@ constexpr SocketHandle kInvalidSocket = static_cast<SocketHandle>(-1);
 bool netStartup();
 void netCleanup();
 
+// Wakes a thread that is blocked reading this socket. Closing alone does not
+// do that on Linux, so this is always called before closeSocket.
+void shutdownSocket(SocketHandle socket);
+
 void closeSocket(SocketHandle socket);
 
 // Opens a TCP connection to the relay server
