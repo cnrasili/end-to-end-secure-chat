@@ -96,33 +96,13 @@ void sendImage(chat::Client& client, const std::string& argument) {
     }
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "usage: chat_client <username> [host] [port]\n";
-        return 1;
-    }
-
-    const std::string username = argv[1];
-    if (username.size() > 32) {
-        std::cerr << "the user name can be at most 32 characters\n";
-        return 1;
-    }
-
-    const std::string host = (argc > 2) ? argv[2] : "127.0.0.1";
-    const int port = (argc > 3) ? std::atoi(argv[3]) : chat::kDefaultPort;
-
-    if (!chat::netStartup()) {
-        std::cerr << "[client] socket library failed to start\n";
-        return 1;
-    }
-
+// Runs one chat session. The Client lives for the whole function, so its socket
+// is closed only after the receive thread has been joined.
+int runClient(const std::string& username, const std::string& host, int port) {
     chat::Client client(username);
     client.setDownloadDir("received_" + username);
 
     if (!client.connectToServer(host, port) || !client.registerWithServer()) {
-        chat::netCleanup();
         return 1;
     }
 
@@ -185,8 +165,34 @@ int main(int argc, char** argv) {
     if (receiver.joinable()) {
         receiver.join();
     }
+    return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "usage: chat_client <username> [host] [port]\n";
+        return 1;
+    }
+
+    const std::string username = argv[1];
+    if (username.size() > 32) {
+        std::cerr << "the user name can be at most 32 characters\n";
+        return 1;
+    }
+
+    const std::string host = (argc > 2) ? argv[2] : "127.0.0.1";
+    const int port = (argc > 3) ? std::atoi(argv[3]) : chat::kDefaultPort;
+
+    if (!chat::netStartup()) {
+        std::cerr << "[client] socket library failed to start\n";
+        return 1;
+    }
+
+    const int result = runClient(username, host, port);
 
     chat::netCleanup();
     std::cout << "[client] bye\n";
-    return 0;
+    return result;
 }

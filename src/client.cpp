@@ -12,6 +12,9 @@ Client::Client(std::string username)
 
 Client::~Client() {
     disconnect();
+    // By now the receive thread has been joined, so nothing else holds the socket
+    closeSocket(socket_);
+    socket_ = kInvalidSocket;
 }
 
 void Client::setDownloadDir(std::string dir) {
@@ -39,12 +42,10 @@ bool Client::connectToServer(const std::string& host, int port) {
 
 void Client::disconnect() {
     running_.store(false);
-    if (socket_ != kInvalidSocket) {
-        // The receive thread is blocked in recv, this is what wakes it
-        shutdownSocket(socket_);
-        closeSocket(socket_);
-        socket_ = kInvalidSocket;
-    }
+    // Wakes the receive thread without closing the socket. Closing it here
+    // would change the handle while that thread is still reading it, so the
+    // destructor does that once the thread is gone.
+    shutdownSocket(socket_);
 }
 
 bool Client::sendPacketLocked(const Message& msg) {
