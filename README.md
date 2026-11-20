@@ -45,15 +45,19 @@ server does not see them either.
 ## How the key is shared
 
 1. Both clients connect and send `REGISTER`, followed by their RSA public key.
-2. The server passes each public key on to the other user.
-3. Each side prints the SHA-256 fingerprint of the other key. The two users can
-   compare these out loud to be sure the server did not swap a key.
-4. The client with the smaller user name creates a random 256 bit AES key,
-   encrypts it with the peer public key (RSA-OAEP, SHA-256) and sends it as
-   `KEY_EXCHANGE`. One side starts, so the two clients cannot overwrite each
-   other's key.
+2. The server passes a public key on to whoever is already connected, so the
+   user who joined first receives the key of the user who joined second.
+3. That user prints the SHA-256 fingerprint of the key it received. The two
+   users can compare it out loud to be sure the server did not swap a key.
+4. The same user creates a random 256 bit AES key, encrypts it with the peer
+   public key (RSA-OAEP, SHA-256) and sends it as `KEY_EXCHANGE`. Should both
+   users come online at the same moment and each receive a key, the smaller user
+   name wins, so the two clients always settle on the same session key.
 5. From then on every message is encrypted with AES-256-GCM. The receiver checks
    the tag first and discards anything that does not match.
+
+Only the user who joined first receives a public key, so only that side can
+check a fingerprint. This follows the sequence diagram in the project proposal.
 
 ## Building
 
@@ -94,7 +98,7 @@ A third argument sets the server address, for example
 |---|---|
 | `/voice [seconds]` | Record and send a voice message, 5 seconds by default |
 | `/image <path>` | Send an image file |
-| `/fp` | Show both key fingerprints |
+| `/fp` | Show the key fingerprints this side knows |
 | `/help` | List the commands |
 | `/quit` | Leave the chat |
 

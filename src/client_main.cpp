@@ -15,7 +15,7 @@ void printHelp() {
     std::cout << "\ncommands:\n"
               << "  /voice [seconds]   record and send a voice message (5 by default)\n"
               << "  /image <path>      send an image file\n"
-              << "  /fp                show both key fingerprints\n"
+              << "  /fp                show the key fingerprints this side knows\n"
               << "  /help              show this list\n"
               << "  /quit              leave the chat\n"
               << "  anything else is sent as a text message\n\n";
@@ -152,11 +152,16 @@ int main(int argc, char** argv) {
             if (command == "/fp") {
                 std::cout << "[client] your key:  " << client.ownFingerprint() << "\n";
                 const std::string peer = client.peerName();
+                const std::string peerPrint = client.peerFingerprint();
                 if (peer.empty()) {
                     std::cout << "[client] no peer yet\n";
+                } else if (peerPrint.empty()) {
+                    // Only the user who joined first is sent a public key
+                    std::cout << "[client] the key of " << peer
+                              << " did not reach this side, ask them to read"
+                                 " out your fingerprint instead\n";
                 } else {
-                    std::cout << "[client] " << peer << ": "
-                              << client.peerFingerprint() << "\n";
+                    std::cout << "[client] " << peer << ": " << peerPrint << "\n";
                 }
                 continue;
             }

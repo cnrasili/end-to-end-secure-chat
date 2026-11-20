@@ -54,7 +54,7 @@ private:
     void handleMedia(const Message& msg);
 
     bool sendPacketLocked(const Message& msg);
-    bool publishPublicKey(const std::string& receiver);
+    bool publishPublicKey();
 
     // Keeps a received file name from pointing anywhere outside the folder
     std::string safeTargetPath(const std::string& fileName) const;
@@ -69,6 +69,7 @@ private:
     std::string peer_;
     RsaKey peerKey_;
     AesKey sessionKey_;
+    bool sentOwnKey_ = false;
 
     std::mutex sendMutex_;
     std::string downloadDir_ = "received";

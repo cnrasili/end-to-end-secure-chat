@@ -60,16 +60,16 @@ bool Client::registerWithServer() {
         return false;
     }
 
-    // An empty receiver means the server passes this to whoever else is online
-    return publishPublicKey("");
+    return publishPublicKey();
 }
 
-bool Client::publishPublicKey(const std::string& receiver) {
+bool Client::publishPublicKey() {
     const Bytes der = keyPair_.publicDer();
     if (der.empty()) {
         return false;
     }
-    return sendPacketLocked(Message(MessageType::PublicKey, username_, receiver, der));
+    // An empty receiver means the server passes this to whoever is already online
+    return sendPacketLocked(Message(MessageType::PublicKey, username_, "", der));
 }
 
 std::string Client::ownFingerprint() const {
@@ -122,6 +122,7 @@ bool Client::startKeyExchange(const std::string& peer) {
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
         sessionKey_ = key;
+        sentOwnKey_ = true;
     }
 
     std::cout << "[client] session key created and sent to " << peer << "\n";
@@ -215,17 +216,8 @@ void Client::handlePublicKey(const Message& msg) {
     std::cout << "[client] compare it with " << msg.sender
               << " before trusting the chat\n";
 
-    // Answer with our own key so both sides can check a fingerprint
-    publishPublicKey(msg.sender);
-
-    // Only one side creates the key, so the two clients cannot overwrite
-    // each other. The smaller user name starts it.
-    if (username_ < msg.sender) {
-        startKeyExchange(msg.sender);
-    } else {
-        std::cout << "[client] waiting for " << msg.sender
-                  << " to send the session key\n";
-    }
+    // Whoever receives the peer public key creates the session key
+    startKeyExchange(msg.sender);
 }
 
 void Client::handleKeyExchange(const Message& msg) {
@@ -238,7 +230,15 @@ void Client::handleKeyExchange(const Message& msg) {
 
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
+
+        // Both sides send a key only when they came online at the same moment.
+        // The smaller user name then wins, so the two clients settle on one key.
+        if (sentOwnKey_ && username_ < msg.sender) {
+            return;
+        }
+
         sessionKey_ = key;
+        sentOwnKey_ = false;
         if (peer_.empty()) {
             peer_ = msg.sender;
         }
