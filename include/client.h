@@ -60,14 +60,15 @@ private:
     std::string safeTargetPath(const std::string& fileName) const;
 
     std::string username_;
+    RsaKey keyPair_;
     CryptoManager crypto_;
     SocketHandle socket_ = kInvalidSocket;
     std::atomic<bool> running_{false};
 
     mutable std::mutex stateMutex_;
     std::string peer_;
-    Bytes peerPublicKey_;
-    Bytes sessionKey_;
+    RsaKey peerKey_;
+    AesKey sessionKey_;
 
     std::mutex sendMutex_;
     std::string downloadDir_ = "received";

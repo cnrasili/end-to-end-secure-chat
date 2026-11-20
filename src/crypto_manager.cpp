@@ -8,16 +8,11 @@
 #include <openssl/x509.h>
 
 #include <cstdio>
+#include <utility>
 
 namespace chat {
 
 namespace {
-
-// Builds an EVP_PKEY holding only a public key, from its DER form
-EVP_PKEY* publicKeyFromDer(const Bytes& der) {
-    const unsigned char* cursor = der.data();
-    return d2i_PUBKEY(nullptr, &cursor, static_cast<long>(der.size()));
-}
 
 // Applies OAEP with SHA-256 to an RSA context
 bool configureOaep(EVP_PKEY_CTX* ctx) {
@@ -29,45 +24,37 @@ bool configureOaep(EVP_PKEY_CTX* ctx) {
 
 }  // namespace
 
-CryptoManager::CryptoManager(int rsaBits) : rsaBits_(rsaBits) {}
+RsaKey::~RsaKey() {
+    reset();
+}
 
-CryptoManager::~CryptoManager() {
-    if (keyPair_ != nullptr) {
-        EVP_PKEY_free(reinterpret_cast<EVP_PKEY*>(keyPair_));
-        keyPair_ = nullptr;
+RsaKey::RsaKey(RsaKey&& other) noexcept : pkey_(other.pkey_) {
+    other.pkey_ = nullptr;
+}
+
+RsaKey& RsaKey::operator=(RsaKey&& other) noexcept {
+    if (this != &other) {
+        reset();
+        pkey_ = other.pkey_;
+        other.pkey_ = nullptr;
+    }
+    return *this;
+}
+
+void RsaKey::reset() {
+    if (pkey_ != nullptr) {
+        EVP_PKEY_free(reinterpret_cast<EVP_PKEY*>(pkey_));
+        pkey_ = nullptr;
     }
 }
 
-bool CryptoManager::generateRsaKeyPair() {
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
-    if (ctx == nullptr) {
-        return false;
-    }
-
-    EVP_PKEY* created = nullptr;
-    bool ok = EVP_PKEY_keygen_init(ctx) > 0 &&
-              EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, rsaBits_) > 0 &&
-              EVP_PKEY_keygen(ctx, &created) > 0;
-    EVP_PKEY_CTX_free(ctx);
-
-    if (!ok) {
-        return false;
-    }
-
-    if (keyPair_ != nullptr) {
-        EVP_PKEY_free(reinterpret_cast<EVP_PKEY*>(keyPair_));
-    }
-    keyPair_ = reinterpret_cast<evp_pkey_st*>(created);
-    return true;
-}
-
-Bytes CryptoManager::publicKeyDer() const {
-    if (keyPair_ == nullptr) {
+Bytes RsaKey::publicDer() const {
+    if (pkey_ == nullptr) {
         return {};
     }
 
     unsigned char* buffer = nullptr;
-    const int length = i2d_PUBKEY(reinterpret_cast<EVP_PKEY*>(keyPair_), &buffer);
+    const int length = i2d_PUBKEY(reinterpret_cast<EVP_PKEY*>(pkey_), &buffer);
     if (length <= 0 || buffer == nullptr) {
         return {};
     }
@@ -77,15 +64,52 @@ Bytes CryptoManager::publicKeyDer() const {
     return der;
 }
 
-bool CryptoManager::rsaEncrypt(const Bytes& peerPublicKeyDer, const Bytes& data, Bytes& out) {
-    EVP_PKEY* peer = publicKeyFromDer(peerPublicKeyDer);
-    if (peer == nullptr) {
+bool RsaKey::fromPublicDer(const Bytes& der, RsaKey& out) {
+    if (der.empty()) {
         return false;
     }
 
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(peer, nullptr);
+    const unsigned char* cursor = der.data();
+    EVP_PKEY* parsed = d2i_PUBKEY(nullptr, &cursor, static_cast<long>(der.size()));
+    if (parsed == nullptr) {
+        return false;
+    }
+
+    out.reset();
+    out.pkey_ = reinterpret_cast<evp_pkey_st*>(parsed);
+    return true;
+}
+
+CryptoManager::CryptoManager(int rsaBits) : rsaBits_(rsaBits) {}
+
+bool CryptoManager::generateRsaKeyPair(RsaKey& out) const {
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
     if (ctx == nullptr) {
-        EVP_PKEY_free(peer);
+        return false;
+    }
+
+    EVP_PKEY* created = nullptr;
+    const bool ok = EVP_PKEY_keygen_init(ctx) > 0 &&
+                    EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, rsaBits_) > 0 &&
+                    EVP_PKEY_keygen(ctx, &created) > 0;
+    EVP_PKEY_CTX_free(ctx);
+
+    if (!ok) {
+        return false;
+    }
+
+    out.reset();
+    out.pkey_ = reinterpret_cast<evp_pkey_st*>(created);
+    return true;
+}
+
+bool CryptoManager::rsaEncrypt(const RsaKey& key, const Bytes& data, Bytes& out) {
+    if (!key.valid()) {
+        return false;
+    }
+
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(reinterpret_cast<EVP_PKEY*>(key.pkey_), nullptr);
+    if (ctx == nullptr) {
         return false;
     }
 
@@ -103,16 +127,18 @@ bool CryptoManager::rsaEncrypt(const Bytes& peerPublicKeyDer, const Bytes& data,
     }
 
     EVP_PKEY_CTX_free(ctx);
-    EVP_PKEY_free(peer);
+    if (!ok) {
+        out.clear();
+    }
     return ok;
 }
 
-bool CryptoManager::rsaDecrypt(const Bytes& data, Bytes& out) const {
-    if (keyPair_ == nullptr) {
+bool CryptoManager::rsaDecrypt(const RsaKey& key, const Bytes& data, Bytes& out) {
+    if (!key.valid()) {
         return false;
     }
 
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(reinterpret_cast<EVP_PKEY*>(keyPair_), nullptr);
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(reinterpret_cast<EVP_PKEY*>(key.pkey_), nullptr);
     if (ctx == nullptr) {
         return false;
     }
@@ -131,6 +157,9 @@ bool CryptoManager::rsaDecrypt(const Bytes& data, Bytes& out) const {
     }
 
     EVP_PKEY_CTX_free(ctx);
+    if (!ok) {
+        out.clear();
+    }
     return ok;
 }
 
@@ -142,7 +171,11 @@ Bytes CryptoManager::randomBytes(size_t count) {
     return buffer;
 }
 
-bool CryptoManager::aesGcmEncrypt(const Bytes& key, const Bytes& plain, Bytes& out) {
+AesKey CryptoManager::randomAesKey() {
+    return randomBytes(kAesKeySize);
+}
+
+bool CryptoManager::aesGcmEncrypt(const AesKey& key, const Bytes& plain, Bytes& out) {
     if (key.size() != kAesKeySize) {
         return false;
     }
@@ -197,7 +230,7 @@ bool CryptoManager::aesGcmEncrypt(const Bytes& key, const Bytes& plain, Bytes& o
     return true;
 }
 
-bool CryptoManager::aesGcmDecrypt(const Bytes& key, const Bytes& packet, Bytes& out) {
+bool CryptoManager::aesGcmDecrypt(const AesKey& key, const Bytes& packet, Bytes& out) {
     if (key.size() != kAesKeySize || packet.size() < kGcmIvSize + kGcmTagSize) {
         return false;
     }
@@ -249,13 +282,14 @@ bool CryptoManager::aesGcmDecrypt(const Bytes& key, const Bytes& packet, Bytes& 
     return true;
 }
 
-std::string CryptoManager::fingerprint(const Bytes& publicKeyDer) {
-    if (publicKeyDer.empty()) {
+std::string CryptoManager::fingerprint(const RsaKey& key) {
+    const Bytes der = key.publicDer();
+    if (der.empty()) {
         return {};
     }
 
     unsigned char digest[SHA256_DIGEST_LENGTH];
-    SHA256(publicKeyDer.data(), publicKeyDer.size(), digest);
+    SHA256(der.data(), der.size(), digest);
 
     // Grouped in blocks of four so the two users can read it out and compare
     std::string text;

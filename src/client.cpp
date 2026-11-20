@@ -20,7 +20,7 @@ void Client::setDownloadDir(std::string dir) {
 
 bool Client::connectToServer(const std::string& host, int port) {
     std::cout << "[client] creating a " << crypto_.rsaBits() << " bit RSA key pair...\n";
-    if (!crypto_.generateRsaKeyPair()) {
+    if (!crypto_.generateRsaKeyPair(keyPair_)) {
         std::cerr << "[client] key generation failed\n";
         return false;
     }
@@ -65,7 +65,7 @@ bool Client::registerWithServer() {
 }
 
 bool Client::publishPublicKey(const std::string& receiver) {
-    const Bytes der = crypto_.publicKeyDer();
+    const Bytes der = keyPair_.publicDer();
     if (der.empty()) {
         return false;
     }
@@ -73,12 +73,12 @@ bool Client::publishPublicKey(const std::string& receiver) {
 }
 
 std::string Client::ownFingerprint() const {
-    return CryptoManager::fingerprint(crypto_.publicKeyDer());
+    return CryptoManager::fingerprint(keyPair_);
 }
 
 std::string Client::peerFingerprint() const {
     std::lock_guard<std::mutex> lock(stateMutex_);
-    return CryptoManager::fingerprint(peerPublicKey_);
+    return CryptoManager::fingerprint(peerKey_);
 }
 
 std::string Client::peerName() const {
@@ -92,29 +92,26 @@ bool Client::hasSessionKey() const {
 }
 
 bool Client::startKeyExchange(const std::string& peer) {
-    Bytes peerKey;
-    {
-        std::lock_guard<std::mutex> lock(stateMutex_);
-        if (peer_ != peer || peerPublicKey_.empty()) {
-            std::cerr << "[client] the public key of " << peer << " is not known yet\n";
-            return false;
-        }
-        if (sessionKey_.size() == kAesKeySize) {
-            return true;
-        }
-        peerKey = peerPublicKey_;
-    }
-
-    const Bytes key = CryptoManager::randomBytes(kAesKeySize);
+    const AesKey key = CryptoManager::randomAesKey();
     if (key.size() != kAesKeySize) {
         std::cerr << "[client] could not create an AES key\n";
         return false;
     }
 
     Bytes wrapped;
-    if (!CryptoManager::rsaEncrypt(peerKey, key, wrapped)) {
-        std::cerr << "[client] could not encrypt the AES key\n";
-        return false;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (peer_ != peer || !peerKey_.valid()) {
+            std::cerr << "[client] the public key of " << peer << " is not known yet\n";
+            return false;
+        }
+        if (sessionKey_.size() == kAesKeySize) {
+            return true;
+        }
+        if (!CryptoManager::rsaEncrypt(peerKey_, key, wrapped)) {
+            std::cerr << "[client] could not encrypt the AES key\n";
+            return false;
+        }
     }
 
     if (!sendPacketLocked(Message(MessageType::KeyExchange, username_, peer, wrapped))) {
@@ -132,7 +129,7 @@ bool Client::startKeyExchange(const std::string& peer) {
 }
 
 bool Client::sendMessage(MessageType type, const Bytes& plaintext) {
-    Bytes key;
+    AesKey key;
     std::string peer;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
@@ -194,9 +191,13 @@ void Client::handlePublicKey(const Message& msg) {
     bool isNewPeer = false;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
-        if (peerPublicKey_.empty()) {
+        if (!peerKey_.valid()) {
+            if (!RsaKey::fromPublicDer(msg.payload, peerKey_)) {
+                std::cerr << "\n[client] the public key of " << msg.sender
+                          << " could not be read\n";
+                return;
+            }
             peer_ = msg.sender;
-            peerPublicKey_ = msg.payload;
             isNewPeer = true;
         } else if (msg.sender != peer_) {
             std::cout << "\n[client] " << msg.sender
@@ -228,8 +229,8 @@ void Client::handlePublicKey(const Message& msg) {
 }
 
 void Client::handleKeyExchange(const Message& msg) {
-    Bytes key;
-    if (!crypto_.rsaDecrypt(msg.payload, key) || key.size() != kAesKeySize) {
+    AesKey key;
+    if (!CryptoManager::rsaDecrypt(keyPair_, msg.payload, key) || key.size() != kAesKeySize) {
         std::cerr << "\n[client] the session key from " << msg.sender
                   << " could not be read\n";
         return;
@@ -248,7 +249,7 @@ void Client::handleKeyExchange(const Message& msg) {
 }
 
 void Client::handleText(const Message& msg) {
-    Bytes key;
+    AesKey key;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
         key = sessionKey_;
@@ -299,7 +300,7 @@ std::string Client::safeTargetPath(const std::string& fileName) const {
 }
 
 void Client::handleMedia(const Message& msg) {
-    Bytes key;
+    AesKey key;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
         key = sessionKey_;
