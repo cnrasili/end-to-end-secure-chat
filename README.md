@@ -6,6 +6,9 @@ TCP relay server. Course project for Data Communications and Computer Networks.
 The server only forwards packets. It never holds the AES key, so it cannot read
 any message that passes through it.
 
+Built and tested on Windows (MSVC, vcpkg) and on Linux (GCC, distribution
+packages).
+
 ## Layout
 
 | Path | Contents |
@@ -78,7 +81,7 @@ in `build\Release`.
 The libraries come from the distribution, so vcpkg is not used here.
 
 ```bash
-sudo apt install g++ cmake pkg-config libssl-dev portaudio19-dev
+sudo apt install g++ cmake make pkg-config libssl-dev portaudio19-dev
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
@@ -88,24 +91,32 @@ and a pkg-config file on Linux, and the build file accepts either one.
 
 ## Running
 
-Start the server in one terminal:
+The server goes in one terminal and each user in a terminal of their own. The
+binaries are in `build\Release` on Windows and in `build` on Linux.
+
+On Windows:
 
 ```powershell
 .\build\Release\chat_server.exe
 ```
 
-Then start each user in a terminal of their own:
-
 ```powershell
 .\build\Release\chat_client.exe alice
 ```
 
-```powershell
-.\build\Release\chat_client.exe bob
+On Linux:
+
+```bash
+./build/chat_server
 ```
 
-A third argument sets the server address, for example
-`chat_client.exe alice 192.168.1.20 5555`.
+```bash
+./build/chat_client alice
+```
+
+The server takes an optional port and the client an optional host and port, so
+`chat_client alice 192.168.1.20 5555` reaches a server on another machine. Both
+sides must use the same port, 5555 by default.
 
 ### Client commands
 
@@ -125,3 +136,17 @@ files are written to `received_<username>`.
 One-to-one chat between two users who are online at the same time, as stated in
 the project proposal. Offline delivery, group chat and stored history are out of
 scope.
+
+## What it does not protect against
+
+The server cannot read a message, but a few things are deliberately left out
+because the proposal does not ask for them:
+
+- **No forward secrecy.** The session key is carried with RSA. Someone who
+  records the traffic and later obtains a private key can read that whole
+  conversation.
+- **No replay protection.** The GCM tag proves a packet was not changed, not
+  that it is new, so an old packet could be sent again.
+- **No authentication of the user name.** A client registers with whatever name
+  it likes. Comparing fingerprints is what catches an impostor, and only the
+  user who joined first can do that.
